@@ -1,74 +1,124 @@
 import sys
 import boto3
-from awsglue.utils import getResolvedOptions
-from awsglue.context import GlueContext
-from awsglue.job import Job
-from pyspark.context import SparkContext
+import snowflake.connector
+from snowflake.connector.pandas_tools import write_pandas
 import pandas as pd
 from io import StringIO
 from datetime import datetime
 import os
+import json
 
-# Get job name and input path from Lambda function
+from awsglue.utils import getResolvedOptions
+
+# Get the Glue job arguments
 args = getResolvedOptions(sys.argv, ['JOB_NAME', 'input_path'])
 
-sc = SparkContext()
-glueContext = GlueContext(sc)
-job = Job(glueContext)
-job.init(args['JOB_NAME'], args)
+input_file_key = args['input_path']
 
-# Function to read S3 file content
-def read_s3_file(s3_path):
-    s3 = boto3.client('s3')
-    bucket, key = s3_path.replace("s3://", "").split("/", 1)
-    obj = s3.get_object(Bucket=bucket, Key=key)
-    return obj['Body'].read().decode('utf-8')
+def get_secret():
+    secret_name = "cwh-glue-secrets/snowflake-credentials"
+    region_name = "us-east-1"
 
-try:
-    # Read the input CSV file
-    input_file_key = args['input_path']
-    print(f"Reading file from: {input_file_key}")
-    file_content = read_s3_file(input_file_key)
-    print("File content read successfully.")
-    
-    # Create DataFrame
-    df = pd.read_csv(StringIO(file_content), delimiter='|', dtype=str)
-    print("DataFrame created successfully.")
-    
-    column_names = [
-        "MRN", "lastname", "firstname", "MI", "dob", "sex", "phone", "Addr1",
-        "Addr2", "City", "State", "zip", "insurance1", "InsuranceType", "Medication",
-        "Class", "NDC", "Quantity", "Refills", "Dx1", "orderer", "NPI", "Site",
-        "SiteName", "SiteAddr", "Method", "Status", "RxDate", "PharmacyName",
-        "PharmacyAddr", "PharmacyCity", "PharmacyState", "PharmacyZip"
-    ]
+    # Create a Secrets Manager client
+    session = boto3.session.Session()
+    client = session.client(
+        service_name='secretsmanager',
+        region_name=region_name
+    )
 
-    df.columns = column_names
+    try:
+        get_secret_value_response = client.get_secret_value(
+            SecretId=secret_name
+        )
+    except ClientError as e:
+        raise e
 
-    # Data Transformations
-    df['dob'] = pd.to_datetime(df['dob']).apply(lambda x: x.strftime('%m-%d-%Y'))
-    df['RxDate'] = pd.to_datetime(df['RxDate']).apply(lambda x: x.strftime('%m-%d-%Y'))
-    df['phone'] = df['phone'].apply(lambda x: x.replace('-', ''))
-    df['File Name'] = os.path.basename(input_file_key)
-    df['Load Timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+    secret = get_secret_value_response['SecretString']
+    return json.loads(secret)
 
-    print("Data transformations completed.")
+def main():
+    print("Starting Glue job")
+    try:
+        # Get Snowflake credentials from Secrets Manager
+        snowflake_conn_params = get_secret()
+        print("Fetched Snowflake credentials")
 
-    # Write the transformed data to S3 as CSV
-    output_buffer = StringIO()
-    df.to_csv(output_buffer, index=False)
-    output_buffer.seek(0)
-    print("CSV data prepared for upload.")
-    
-    s3_resource = boto3.resource('s3')
-    output_bucket = "bmc-tfs-bucket-030063318327"
-    #output_key = f"DecryptedFiles/test_transform/{os.path.basename(input_file_key)}"
-    output_key = f"DecryptedFiles/test_transform/{os.path.splitext(os.path.basename(input_file_key))[0]}.csv"
-    
-    s3_resource.Object(output_bucket, output_key).put(Body=output_buffer.getvalue())
-    print(f"File successfully uploaded to {output_bucket}/{output_key}")
+        # Snowflake connection details
+        snowflake_conn_params.update({
+            'account': 'xbb27476.us-east-1',  # account details
+            'warehouse': 'COMPUTE_WH',  # Provided Snowflake warehouse name
+            'database': 'CLIENT_SIG',  # Your Snowflake database name
+            'schema': 'STG_DATA'  # Your Snowflake schema name
+        })
 
-except Exception as e:
-    print(f"Error: {e}")
+        conn = None
 
-job.commit()
+        try:
+            print(f"Processing file: {input_file_key}")
+
+            # Connect to Snowflake
+            conn = snowflake.connector.connect(
+                user=snowflake_conn_params['user'],
+                password=snowflake_conn_params['password'],
+                account=snowflake_conn_params['account'],
+                warehouse=snowflake_conn_params['warehouse'],
+                database=snowflake_conn_params['database'],
+                schema=snowflake_conn_params['schema']
+            )
+            cursor = conn.cursor()
+            print("Successfully connected to Snowflake")
+
+            # Truncate the table
+            cursor.execute("TRUNCATE TABLE CLIENT_SIG.STG_DATA.SIG_Weekly340Rx")
+            print("Table truncated")
+
+            # Read the input CSV file from S3
+            def read_s3_file(s3_path):
+                s3 = boto3.client('s3')
+                bucket, key = s3_path.replace("s3://", "").split("/", 1)
+                obj = s3.get_object(Bucket=bucket, Key=key)
+                return obj['Body'].read().decode('utf-8')
+
+            print(f"Reading file from: {input_file_key}")
+            file_content = read_s3_file(input_file_key)
+            print("File content read successfully")
+
+            # Create DataFrame
+            df = pd.read_csv(StringIO(file_content), delimiter='|', dtype=str)
+            print("DataFrame created successfully")
+
+            column_names = [
+                "MRN", "lastname", "firstname", "MI", "dob", "sex", "phone", "Addr1",
+                "Addr2", "City", "State", "zip", "insurance1", "InsuranceType", "Medication",
+                "Class", "NDC", "Quantity", "Refills", "Dx1", "orderer", "NPI", "Site",
+                "SiteName", "SiteAddr", "Method", "Status", "RxDate", "PharmacyName",
+                "PharmacyAddr", "PharmacyCity", "PharmacyState", "PharmacyZip"
+            ]
+            df.columns = column_names
+            # Data Transformations
+            df['dob'] = pd.to_datetime(df['dob'], errors='coerce').apply(lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else None)
+            df['RxDate'] = pd.to_datetime(df['RxDate'], errors='coerce').apply(lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else None)
+            df['phone'] = df['phone'].apply(lambda x: x.replace('-', ''))
+            df['File Name'] = os.path.basename(input_file_key)
+            df['Load Timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            print("Data transformations completed")
+
+            # Insert DataFrame into Snowflake using write_pandas
+            success, nchunks, nrows, _ = write_pandas(conn, df, 'SIG_Weekly340Rx', quote_identifiers=False)
+            print(f"Data successfully uploaded to Snowflake table SIG_Weekly340Rx: {success}, {nchunks}, {nrows}")
+
+        except Exception as e:
+            print(f"Error in data processing: {e}")
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    except Exception as e:
+        print(f"Error in Glue job: {e}")
+
+    print("Glue job completed")
+
+if __name__ == "__main__":
+    main()
