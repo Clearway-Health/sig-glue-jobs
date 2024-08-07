@@ -69,7 +69,7 @@ def main():
             print("Successfully connected to Snowflake")
 
             # Truncate the table
-            cursor.execute("TRUNCATE TABLE CLIENT_SIG.STG_DATA.SIG_Weekly340Rx")
+            cursor.execute("TRUNCATE TABLE CLIENT_SIG.STG_DATA.SIG_WEEKLY340RX")
             print("Table truncated")
 
             # Read the input CSV file from S3
@@ -87,25 +87,27 @@ def main():
             df = pd.read_csv(StringIO(file_content), delimiter='|', dtype=str)
             print("DataFrame created successfully")
 
+            # Ensure column names match the Snowflake table
             column_names = [
-                "MRN", "lastname", "firstname", "MI", "dob", "sex", "phone", "Addr1",
-                "Addr2", "City", "State", "zip", "insurance1", "InsuranceType", "Medication",
-                "Class", "NDC", "Quantity", "Refills", "Dx1", "orderer", "NPI", "Site",
-                "SiteName", "SiteAddr", "Method", "Status", "RxDate", "PharmacyName",
-                "PharmacyAddr", "PharmacyCity", "PharmacyState", "PharmacyZip"
+                "MRN", "LASTNAME", "FIRSTNAME", "MI", "DOB", "SEX", "PHONE", "ADDR1",
+                "ADDR2", "CITY", "STATE", "ZIP", "INSURANCE1", "INSURANCETYPE", "MEDICATION",
+                "CLASS", "NDC", "QUANTITY", "REFILLS", "DX1", "ORDERER", "NPI", "SITE",
+                "SITENAME", "SITEADDR", "METHOD", "STATUS", "RXDATE", "PHARMACYNAME",
+                "PHARMACYADDR", "PHARMACYCITY", "PHARMACYSTATE", "PHARMACYZIP",
             ]
             df.columns = column_names
+
             # Data Transformations
-            df['dob'] = pd.to_datetime(df['dob'], errors='coerce').apply(lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else None)
-            df['RxDate'] = pd.to_datetime(df['RxDate'], errors='coerce').apply(lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else None)
-            df['phone'] = df['phone'].apply(lambda x: x.replace('-', ''))
-            df['File Name'] = os.path.basename(input_file_key)
-            df['Load Timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            df['DOB'] = pd.to_datetime(df['DOB'], errors='coerce').apply(lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else None)
+            df['RXDATE'] = pd.to_datetime(df['RXDATE'], errors='coerce').apply(lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else None)
+            df['PHONE'] = df['PHONE'].apply(lambda x: x.replace('-', ''))
+            df['FILE_NAME'] = os.path.basename(input_file_key)
+            df['LOAD_TIMESTAMP'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
             print("Data transformations completed")
 
             # Insert DataFrame into Snowflake using write_pandas
-            success, nchunks, nrows, _ = write_pandas(conn, df, 'SIG_Weekly340Rx', quote_identifiers=False)
-            print(f"Data successfully uploaded to Snowflake table SIG_Weekly340Rx: {success}, {nchunks}, {nrows}")
+            success, nchunks, nrows, _ = write_pandas(conn, df, 'SIG_WEEKLY340RX', quote_identifiers=True)
+            print(f"Data successfully uploaded to Snowflake table SIG_WEEKLY340RX: {success}, {nchunks}, {nrows}")
 
         except Exception as e:
             print(f"Error in data processing: {e}")
