@@ -71,21 +71,17 @@ try:
     print("DataFrame created successfully")
 
     # Ensure column names match the Snowflake table
-    column_names = [
-        "MRN", "LASTNAME", "FIRSTNAME", "MI", "DOB", "SEX", "PHONE", "ADDR1",
-        "ADDR2", "CITY", "STATE", "ZIP", "INSURANCE1", "INSURANCETYPE", "MEDICATION",
-        "CLASS", "NDC", "QUANTITY", "REFILLS", "DX1", "ORDERER", "NPI", "SITE",
-        "SITENAME", "SITEADDR", "METHOD", "STATUS", "RXDATE", "PHARMACYNAME",
-        "PHARMACYADDR", "PHARMACYCITY", "PHARMACYSTATE", "PHARMACYZIP",
-    ]
+    column_names = [ 'MRN','LAST_NAME','FIRST_NAME','MI','DOB','SEX','PHONE','ADDR1','ADDR2','CITY','STATE','ZIP','INSURANCE_1',
+'INSURANCE_TYPE','MEDICATION','CLASS','NDC','QUANTITY','RE_FILLS','DX1','ORDERER','NPI','SITE','SITE_NAME','SITE_ADDR','METHOD','STATUS','RX_DATE','PHARMACY_NAME','PHARMACY_ADDR','PHARMACY_CITY','PHARMACY_STATE','PHARMACY_ZIP']
+    
     df.columns = column_names
 
     # Data Transformations
     df['DOB'] = pd.to_datetime(df['DOB'], errors='coerce').apply(lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else None)
-    df['RXDATE'] = pd.to_datetime(df['RXDATE'], errors='coerce').apply(lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else None)
+    df['RX_DATE'] = pd.to_datetime(df['RX_DATE'], errors='coerce').apply(lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else None)
     df['PHONE'] = df['PHONE'].apply(lambda x: x.replace('-', ''))
     df['FILE_NAME'] = os.path.basename(input_file_key)
-    df['LOAD_TIMESTAMP'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+    df['LOAD_TIME'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
     print("Data transformations completed")
     
 ############################################################################
